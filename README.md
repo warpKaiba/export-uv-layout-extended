@@ -16,13 +16,12 @@ These settings feel like that they should be included in the original addon itse
 
 ## Installation
 
-> **NOTE**: The addon was tested on Blender 3.0.0+ but should be compatible with 2.8+
+> **NOTE**: The addon was updated to work with 5.0.0, should work back through 3.7
 
-Can be installed like usual by installing the addons _.zip_ archive through the Blender preferences window.
+Can be installed by installing ExportUVLayoutExtended.py through Blender preferences > Add-ons > top-right corner dropdown > Install from Disk.
 
 The menu options appears where the regular Export UV Layout option is in `Image-Window > UVs > Export UV Layout Extended`. Export settings appear in the file chooser dialog.
 
 ## Downloads
 
-Download `ExportUVLayoutExtended.zip` from [releases](https://github.com/xDUDSSx/export-uv-layout-extended/releases).  
-Alternatively you can zip the `ExportUVLayoutExtended` folder yourself after cloning the repo.
+Download `ExportUVLayoutExtended.py` from [releases](https://github.com/warpKaiba/export-uv-layout-extended/releases).  

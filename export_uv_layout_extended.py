@@ -20,8 +20,8 @@
 bl_info = {
 	"name": "Export UV Layout Extended",
 	"author": "Campbell Barton, Matt Ebb, DUDSS",
-	"version": (1, 1, 1),
-	"blender": (3, 0, 1),
+	"version": (1, 1, 2),
+	"blender": (5, 0, 1),
 	"location": "Image-Window > UVs > Export UV Layout (Extended)",
 	"description": "Export the UV layout as a 2D graphic to PNG with expanded options (outline/fill only, colors, ignoring materials, disable AA, saving state)",
 	"warning": "",
@@ -32,7 +32,6 @@ bl_info = {
 
 import bpy
 import gpu
-import bgl
 from mathutils import Vector, Matrix
 from mathutils.geometry import tessellate_polygon
 from gpu_extras.batch import batch_for_shader
@@ -42,34 +41,29 @@ def export(filepath, face_data, colors, width, height, opacity, draw_fill, draw_
 	offscreen.bind()
 
 	try:
-		bgl.glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3])
-		bgl.glClear(bgl.GL_COLOR_BUFFER_BIT)
+		fb = gpu.state.active_framebuffer_get()
+		fb.clear(color=(clear_color[0], clear_color[1], clear_color[2], clear_color[3]))
 		draw_image(face_data, opacity, draw_fill, draw_outline, outline_color, enable_aa)
 
-		pixel_data = get_pixel_data_from_current_back_buffer(width, height)
+		pixel_data = fb.read_color(0, 0, width, height, 4, 0, 'UBYTE')
+		pixel_data.dimensions = width * height * 4
 		save_pixels(filepath, pixel_data, width, height)
 	finally:
 		offscreen.unbind()
 		offscreen.free()
 
 def draw_image(face_data, opacity, draw_fill, draw_outline, outline_color, enable_aa):
-	bgl.glLineWidth(1)
-	bgl.glEnable(bgl.GL_BLEND)
-	if enable_aa:
-		bgl.glEnable(bgl.GL_LINE_SMOOTH)
-		bgl.glHint(bgl.GL_LINE_SMOOTH_HINT, bgl.GL_NICEST)
-	bgl.glLineWidth(1.0);
+	gpu.state.blend_set("ALPHA_PREMULT")
 
 	with gpu.matrix.push_pop():
 		gpu.matrix.load_matrix(get_normalize_uvs_matrix())
 		gpu.matrix.load_projection_matrix(Matrix.Identity(4))
 
-		if draw_fill: draw_background_colors(face_data, opacity)
-		if draw_outline: draw_lines(face_data, outline_color)
+		if draw_fill: draw_background_colors(face_data, opacity, enable_aa)
+		if draw_outline: draw_lines(face_data, outline_color, enable_aa)
 
-	bgl.glDisable(bgl.GL_BLEND)
-	if enable_aa:
-		bgl.glDisable(bgl.GL_LINE_SMOOTH)
+	gpu.state.blend_set('NONE')
+
 
 def get_normalize_uvs_matrix():
 	'''matrix maps x and y coordinates from [0, 1] to [-1, 1]'''
@@ -80,7 +74,7 @@ def get_normalize_uvs_matrix():
 	matrix[1][1] = 2
 	return matrix
 
-def draw_background_colors(face_data, opacity):
+def draw_background_colors(face_data, opacity, enable_aa):
 	coords = [uv for uvs, _ in face_data for uv in uvs]
 	colors = [(*color, opacity) for uvs, color in face_data for _ in range(len(uvs))]
 
@@ -90,8 +84,10 @@ def draw_background_colors(face_data, opacity):
 		triangles = tessellate_uvs(uvs)
 		indices.extend([index + offset for index in triangle] for triangle in triangles)
 		offset += len(uvs)
-
-	shader = gpu.shader.from_builtin('2D_FLAT_COLOR')
+	if enable_aa:
+		shader = gpu.shader.from_builtin('POLYLINE_FLAT_COLOR')
+	else:
+		shader = gpu.shader.from_builtin('FLAT_COLOR')
 	batch = batch_for_shader(shader, 'TRIS',
 		{"pos" : coords,
 		 "color" : colors},
@@ -101,7 +97,7 @@ def draw_background_colors(face_data, opacity):
 def tessellate_uvs(uvs):
 	return tessellate_polygon([uvs])
 
-def draw_lines(face_data, color):
+def draw_lines(face_data, color, enable_aa):
 	coords = []
 	for uvs, _ in face_data:
 		for i in range(len(uvs)):
@@ -109,11 +105,16 @@ def draw_lines(face_data, color):
 			end = uvs[(i+1) % len(uvs)]
 			coords.append((start[0], start[1]))
 			coords.append((end[0], end[1]))
-
-	shader = gpu.shader.from_builtin('2D_UNIFORM_COLOR')
-	batch = batch_for_shader(shader, 'LINES', {"pos" : coords})
-	shader.bind()
+	if enable_aa:
+		shader = gpu.shader.from_builtin('POLYLINE_UNIFORM_COLOR')
+		shader.uniform_float("viewportSize", gpu.state.viewport_get()[2:])
+		shader.uniform_float("lineWidth", 1.0)
+	else:
+		shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+		
 	shader.uniform_float("color", color)
+	
+	batch = batch_for_shader(shader, 'LINES', {"pos" : coords})
 	batch.draw(shader)
 
 #    vertices = (
@@ -126,17 +127,6 @@ def draw_lines(face_data, color):
 #    shader.bind()
 #    shader.uniform_float("color", color)
 #    batch.draw(shader)
-
-def draw():
-	shader.bind()
-	shader.uniform_float("color", (0, 0.5, 0.5, 1.0))
-	batch.draw(shader)
-
-def get_pixel_data_from_current_back_buffer(width, height):
-	buffer = bgl.Buffer(bgl.GL_BYTE, width * height * 4)
-	bgl.glReadBuffer(bgl.GL_BACK)
-	bgl.glReadPixels(0, 0, width, height, bgl.GL_RGBA, bgl.GL_UNSIGNED_BYTE, buffer)
-	return buffer
 
 def save_pixels(filepath, pixel_data, width, height):
 	image = bpy.data.images.new("temp", width, height, alpha=True)
